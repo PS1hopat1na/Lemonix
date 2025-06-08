@@ -31,8 +31,8 @@ def fetchall_dict(rows, description):
 
 def get_all_products():
     conn = get_db_connection()
-    result = conn.run("SELECT * FROM products ORDER BY id DESC")
-    products = fetchall_dict(result.rows, result.description)
+    rows = conn.run("SELECT * FROM products ORDER BY id DESC")
+    products = fetchall_dict(rows, conn.description)
     conn.close()
     return products
 
@@ -40,8 +40,8 @@ def get_cart_count(phone):
     if not phone:
         return 0
     conn = get_db_connection()
-    result = conn.run("SELECT COUNT(*) FROM carts WHERE user_phone = %s", (phone,))
-    count = result.rows[0][0] if result.rows else 0
+    rows = conn.run("SELECT COUNT(*) FROM carts WHERE user_phone = %s", (phone,))
+    count = rows[0][0] if rows else 0
     conn.close()
     return count
 
@@ -62,15 +62,15 @@ def login():
         phone = request.form['phone']
         username = request.form['username']
         conn = get_db_connection()
-        result = conn.run("SELECT * FROM users WHERE phone = %s", (phone,))
-        user_row = result.rows[0] if result.rows else None
+        rows = conn.run("SELECT * FROM users WHERE phone = %s", (phone,))
+        user_row = rows[0] if rows else None
         user = None
         if user_row:
-            user = dict(zip([col.name for col in result.description], user_row))
+            user = dict(zip([col.name for col in conn.description], user_row))
         if not user:
-            inserted_result = conn.run("INSERT INTO users (phone, username) VALUES (%s, %s) RETURNING *", (phone, username))
-            inserted_row = inserted_result.rows[0]
-            user = dict(zip([col.name for col in inserted_result.description], inserted_row))
+            inserted_rows = conn.run("INSERT INTO users (phone, username) VALUES (%s, %s) RETURNING *", (phone, username))
+            inserted_row = inserted_rows[0]
+            user = dict(zip([col.name for col in conn.description], inserted_row))
             conn.commit()
         else:
             if username and user.get('username') != username:
@@ -102,19 +102,19 @@ def product_detail(product_id):
     phone = session.get('phone')
     is_admin = session.get('is_admin', False)
     conn = get_db_connection()
-    result = conn.run("SELECT * FROM products WHERE id = %s", (product_id,))
-    product_row = result.rows[0] if result.rows else None
-    product = dict(zip([col.name for col in result.description], product_row)) if product_row else None
+    rows = conn.run("SELECT * FROM products WHERE id = %s", (product_id,))
+    product_row = rows[0] if rows else None
+    product = dict(zip([col.name for col in conn.description], product_row)) if product_row else None
 
-    review_result = conn.run("SELECT * FROM reviews WHERE product_id = %s ORDER BY created_at DESC", (product_id,))
-    reviews = fetchall_dict(review_result.rows, review_result.description)
+    review_rows = conn.run("SELECT * FROM reviews WHERE product_id = %s ORDER BY created_at DESC", (product_id,))
+    reviews = fetchall_dict(review_rows, conn.description)
 
-    avg_rating_result = conn.run("SELECT AVG(rating) FROM reviews WHERE product_id = %s", (product_id,))
-    avg_rating_row = avg_rating_result.rows[0] if avg_rating_result.rows else None
+    avg_rating_rows = conn.run("SELECT AVG(rating) FROM reviews WHERE product_id = %s", (product_id,))
+    avg_rating_row = avg_rating_rows[0] if avg_rating_rows else None
     avg_rating = avg_rating_row[0] if avg_rating_row else 0
 
-    rec_result = conn.run("SELECT * FROM products WHERE id != %s ORDER BY RANDOM() LIMIT 4", (product_id,))
-    recommendations = fetchall_dict(rec_result.rows, rec_result.description)
+    rec_rows = conn.run("SELECT * FROM products WHERE id != %s ORDER BY RANDOM() LIMIT 4", (product_id,))
+    recommendations = fetchall_dict(rec_rows, conn.description)
 
     conn.close()
 
@@ -166,9 +166,9 @@ def cart():
         flash('Войдите, чтобы видеть корзину!')
         return redirect(url_for('main.login'))
     conn = get_db_connection()
-    result = conn.run(
+    rows = conn.run(
         "SELECT c.id as cart_id, p.* FROM carts c JOIN products p ON c.product_id=p.id WHERE c.user_phone=%s", (phone,))
-    cart_items = fetchall_dict(result.rows, result.description)
+    cart_items = fetchall_dict(rows, conn.description)
     cart_total = sum(item['price'] for item in cart_items)
     order_id = 100000 + int(datetime.now().timestamp()) % 100000
     order_date = datetime.now().strftime('%d.%m.%Y %H:%M')
@@ -184,13 +184,13 @@ def remove_from_cart(cart_id):
     try:
         conn.run("DELETE FROM carts WHERE id=%s AND user_phone=%s", (cart_id, phone))
         conn.commit()
-        result = conn.run("""
+        rows = conn.run("""
             SELECT c.id, p.name, p.price, p.image_url
             FROM carts c
             JOIN products p ON c.product_id = p.id
             WHERE c.user_phone = %s
         """, (phone,))
-        rows_data = fetchall_dict(result.rows, result.description)
+        rows_data = fetchall_dict(rows, conn.description)
         cart_total = sum(row['price'] for row in rows_data)
         cart_count = len(rows_data)
         session['cart_count'] = cart_count
@@ -262,13 +262,13 @@ def checkout():
         return jsonify({'success': False, 'msg': 'Войдите в аккаунт'})
     conn = get_db_connection()
     try:
-        result = conn.run("""
+        rows = conn.run("""
             SELECT c.id, p.name, p.price
             FROM carts c
             JOIN products p ON c.product_id = p.id
             WHERE c.user_phone = %s
         """, (phone,))
-        items = fetchall_dict(result.rows, result.description)
+        items = fetchall_dict(rows, conn.description)
         if not items:
             return jsonify({'success': False, 'msg': 'Корзина пуста'})
         order_id = 100000 + int(datetime.now().timestamp()) % 100000
