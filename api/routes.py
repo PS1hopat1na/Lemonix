@@ -3,6 +3,7 @@ import pg8000.native
 import urllib.parse
 import os
 from datetime import datetime
+from contextlib import contextmanager
 
 bp = Blueprint('main', __name__)
 
@@ -11,7 +12,8 @@ DATABASE_URL = os.getenv(
     "postgresql://postgres.wsmvmimkbigkwzigivxz:89950510391z@aws-0-eu-central-1.pooler.supabase.com:6543/postgres"
 )
 
-def get_db_connection():
+@contextmanager
+def db_connection():
     result = urllib.parse.urlparse(DATABASE_URL)
     username = result.username
     password = urllib.parse.unquote(result.password) if result.password else ""
@@ -19,34 +21,35 @@ def get_db_connection():
     hostname = result.hostname
     port = result.port
 
-    conn = pg8000.native.Connection(
-        user=username,
-        password=password,
-        database=database,
-        host=hostname,
-        port=port
-    )
-    return conn
+    conn = None
+    try:
+        conn = pg8000.native.Connection(
+            user=username,
+            password=password,
+            database=database,
+            host=hostname,
+            port=port
+        )
+        yield conn
+    finally:
+        if conn:
+            conn.close()
 
 def fetchall_dict(rows, description):
-    columns = [col.name for col in description]
+    columns = [col["name"] for col in description]
     return [dict(zip(columns, row)) for row in rows]
 
 def get_all_products():
-    conn = get_db_connection()
-    result = conn.run("SELECT * FROM products ORDER BY id DESC")
-    products = fetchall_dict(result.rows, result.description)
-    conn.close()
-    return products
+    with db_connection() as conn:
+        result = conn.run("SELECT * FROM products ORDER BY id DESC")
+        return fetchall_dict(result, conn.columns)
 
 def get_cart_count(phone):
     if not phone:
         return 0
-    conn = get_db_connection()
-    result = conn.run("SELECT COUNT(*) FROM carts WHERE user_phone = %s", (phone,))
-    count = result.rows[0][0] if result.rows else 0
-    conn.close()
-    return count
+    with db_connection() as conn:
+        result = conn.run("SELECT COUNT(*) FROM carts WHERE user_phone = %s", (phone,))
+        return result[0][0] if result else 0
 
 @bp.app_context_processor
 def inject_cart_count():
@@ -64,29 +67,31 @@ def login():
     if request.method == 'POST':
         phone = request.form['phone']
         username = request.form['username']
-        conn = get_db_connection()
-        result = conn.run("SELECT * FROM users WHERE phone = %s", (phone,))
-        user_row = result.rows[0] if result.rows else None
-        user = None
-        if user_row:
-            user = dict(zip([col.name for col in result.description], user_row))
-        if not user:
-            inserted_result = conn.run(
-                "INSERT INTO users (phone, username) VALUES (%s, %s) RETURNING *",
-                (phone, username)
-            )
-            inserted_row = inserted_result.rows[0]
-            user = dict(zip([col.name for col in inserted_result.description], inserted_row))
-            conn.commit()
-        else:
-            if username and user.get('username') != username:
-                conn.run("UPDATE users SET username=%s WHERE phone=%s", (username, phone))
+        
+        with db_connection() as conn:
+            result = conn.run("SELECT * FROM users WHERE phone = %s", (phone,))
+            user_row = result[0] if result else None
+            user = None
+            
+            if user_row:
+                user = dict(zip([col["name"] for col in conn.columns], user_row))
+            
+            if not user:
+                inserted_result = conn.run(
+                    "INSERT INTO users (phone, username) VALUES (%s, %s) RETURNING *",
+                    (phone, username)
+                user = dict(zip([col["name"] for col in conn.columns], inserted_result[0]))
                 conn.commit()
-        conn.close()
-        session['phone'] = phone
-        session['username'] = user.get('username') or username
-        session['is_admin'] = user.get('is_admin', False)
-        return redirect(url_for('main.index'))
+            else:
+                if username and user.get('username') != username:
+                    conn.run("UPDATE users SET username=%s WHERE phone=%s", (username, phone))
+                    conn.commit()
+            
+            session['phone'] = phone
+            session['username'] = user.get('username') or username
+            session['is_admin'] = user.get('is_admin', False)
+            return redirect(url_for('main.index'))
+    
     return render_template('login.html')
 
 @bp.route('/logout')
@@ -107,33 +112,34 @@ def shop():
 def product_detail(product_id):
     phone = session.get('phone')
     is_admin = session.get('is_admin', False)
-    conn = get_db_connection()
-    result = conn.run("SELECT * FROM products WHERE id = %s", (product_id,))
-    product_row = result.rows[0] if result.rows else None
-    product = dict(zip([col.name for col in result.description], product_row)) if product_row else None
+    
+    with db_connection() as conn:
+        # Получаем продукт
+        result = conn.run("SELECT * FROM products WHERE id = %s", (product_id,))
+        product_row = result[0] if result else None
+        product = dict(zip([col["name"] for col in conn.columns], product_row)) if product_row else None
 
-    review_result = conn.run("SELECT * FROM reviews WHERE product_id = %s ORDER BY created_at DESC", (product_id,))
-    reviews = fetchall_dict(review_result.rows, review_result.description)
+        # Получаем отзывы
+        review_result = conn.run("SELECT * FROM reviews WHERE product_id = %s ORDER BY created_at DESC", (product_id,))
+        reviews = fetchall_dict(review_result, conn.columns)
 
-    avg_rating_result = conn.run("SELECT AVG(rating) FROM reviews WHERE product_id = %s", (product_id,))
-    avg_rating_row = avg_rating_result.rows[0] if avg_rating_result.rows else None
-    avg_rating = avg_rating_row[0] if avg_rating_row else 0
+        # Средний рейтинг
+        avg_rating_result = conn.run("SELECT AVG(rating) FROM reviews WHERE product_id = %s", (product_id,))
+        avg_rating = avg_rating_result[0][0] if avg_rating_result and avg_rating_result[0][0] else 0
 
-    rec_result = conn.run("SELECT * FROM products WHERE id != %s ORDER BY RANDOM() LIMIT 4", (product_id,))
-    recommendations = fetchall_dict(rec_result.rows, rec_result.description)
-
-    conn.close()
+        # Рекомендации
+        rec_result = conn.run("SELECT * FROM products WHERE id != %s ORDER BY RANDOM() LIMIT 4", (product_id,))
+        recommendations = fetchall_dict(rec_result, conn.columns)
 
     if request.method == 'POST' and phone:
         rating = int(request.form['rating'])
         text = request.form['text']
-        conn = get_db_connection()
-        conn.run(
-            "INSERT INTO reviews (product_id, user_phone, rating, text) VALUES (%s, %s, %s, %s)",
-            (product_id, phone, rating, text)
-        )
-        conn.commit()
-        conn.close()
+        with db_connection() as conn:
+            conn.run(
+                "INSERT INTO reviews (product_id, user_phone, rating, text) VALUES (%s, %s, %s, %s)",
+                (product_id, phone, rating, text)
+            )
+            conn.commit()
         flash('Ваш отзыв добавлен!')
         return redirect(url_for('main.product_detail', product_id=product_id))
 
@@ -155,13 +161,15 @@ def add_to_cart(product_id):
             return jsonify({'error': 'Требуется вход'}), 403
         flash('Войдите, чтобы добавить в корзину!')
         return redirect(url_for('main.login'))
-    conn = get_db_connection()
-    conn.run("INSERT INTO carts (user_phone, product_id) VALUES (%s, %s)", (phone, product_id))
-    conn.commit()
-    conn.close()
+    
+    with db_connection() as conn:
+        conn.run("INSERT INTO carts (user_phone, product_id) VALUES (%s, %s)", (phone, product_id))
+        conn.commit()
+    
     count = get_cart_count(phone)
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return jsonify({'count': count, 'success': True})
+    
     flash('Товар добавлен в корзину!')
     return redirect(url_for('main.cart'))
 
@@ -171,43 +179,56 @@ def cart():
     if not phone:
         flash('Войдите, чтобы видеть корзину!')
         return redirect(url_for('main.login'))
-    conn = get_db_connection()
-    result = conn.run(
-        "SELECT c.id as cart_id, p.* FROM carts c JOIN products p ON c.product_id=p.id WHERE c.user_phone=%s",
-        (phone,)
+    
+    with db_connection() as conn:
+        result = conn.run(
+            "SELECT c.id as cart_id, p.* FROM carts c JOIN products p ON c.product_id=p.id WHERE c.user_phone=%s",
+            (phone,)
+        )
+        cart_items = fetchall_dict(result, conn.columns)
+        cart_total = sum(item['price'] for item in cart_items)
+        order_id = 100000 + int(datetime.now().timestamp()) % 100000
+        order_date = datetime.now().strftime('%d.%m.%Y %H:%M')
+    
+    return render_template(
+        'cart.html',
+        cart_items=cart_items,
+        phone=phone,
+        cart_total=cart_total,
+        order_id=order_id,
+        order_date=order_date
     )
-    cart_items = fetchall_dict(result.rows, result.description)
-    cart_total = sum(item['price'] for item in cart_items)
-    order_id = 100000 + int(datetime.now().timestamp()) % 100000
-    order_date = datetime.now().strftime('%d.%m.%Y %H:%M')
-    conn.close()
-    return render_template('cart.html', cart_items=cart_items, phone=phone, cart_total=cart_total, order_id=order_id, order_date=order_date)
 
 @bp.route('/remove_from_cart/<int:cart_id>', methods=['POST'])
 def remove_from_cart(cart_id):
     phone = session.get('phone')
     if not phone:
         return jsonify({'success': False, 'msg': 'Войдите в аккаунт'})
-    conn = get_db_connection()
+    
     try:
-        conn.run("DELETE FROM carts WHERE id=%s AND user_phone=%s", (cart_id, phone))
-        conn.commit()
-        result = conn.run("""
-            SELECT c.id, p.name, p.price, p.image_url
-            FROM carts c
-            JOIN products p ON c.product_id = p.id
-            WHERE c.user_phone = %s
-        """, (phone,))
-        rows_data = fetchall_dict(result.rows, result.description)
-        cart_total = sum(row['price'] for row in rows_data)
-        cart_count = len(rows_data)
-        session['cart_count'] = cart_count
-        return jsonify({'success': True, 'cart_total': cart_total, 'cart_count': cart_count})
+        with db_connection() as conn:
+            conn.run("DELETE FROM carts WHERE id=%s AND user_phone=%s", (cart_id, phone))
+            conn.commit()
+            
+            result = conn.run("""
+                SELECT c.id, p.name, p.price, p.image_url
+                FROM carts c
+                JOIN products p ON c.product_id = p.id
+                WHERE c.user_phone = %s
+            """, (phone,))
+            
+            rows_data = fetchall_dict(result, conn.columns)
+            cart_total = sum(row['price'] for row in rows_data)
+            cart_count = len(rows_data)
+            session['cart_count'] = cart_count
+            
+            return jsonify({
+                'success': True,
+                'cart_total': cart_total,
+                'cart_count': cart_count
+            })
     except Exception as e:
-        conn.rollback()
         return jsonify({'success': False, 'msg': str(e)})
-    finally:
-        conn.close()
 
 @bp.route('/about')
 def about():
@@ -231,22 +252,25 @@ def contact():
 def admin():
     phone = session.get('phone')
     is_admin = session.get('is_admin', False)
+    
     if not is_admin:
         flash('Доступ только для администратора!')
         return redirect(url_for('main.index'))
+    
     if request.method == 'POST':
         name = request.form['name']
         description = request.form['description']
         price = request.form['price']
         image_url = request.form['image_url']
-        conn = get_db_connection()
-        conn.run(
-            "INSERT INTO products (name, description, price, image_url) VALUES (%s, %s, %s, %s)",
-            (name, description, price, image_url)
-        )
-        conn.commit()
-        conn.close()
+        
+        with db_connection() as conn:
+            conn.run(
+                "INSERT INTO products (name, description, price, image_url) VALUES (%s, %s, %s, %s)",
+                (name, description, price, image_url)
+            )
+            conn.commit()
         flash('Товар успешно добавлен!')
+    
     products = get_all_products()
     return render_template('admin.html', phone=phone, is_admin=is_admin, products=products)
 
@@ -255,11 +279,12 @@ def delete_product(product_id):
     if not session.get('is_admin', False):
         flash('Нет доступа!')
         return redirect(url_for('main.index'))
-    conn = get_db_connection()
-    conn.run("DELETE FROM reviews WHERE product_id = %s", (product_id,))
-    conn.run("DELETE FROM products WHERE id = %s", (product_id,))
-    conn.commit()
-    conn.close()
+    
+    with db_connection() as conn:
+        conn.run("DELETE FROM reviews WHERE product_id = %s", (product_id,))
+        conn.run("DELETE FROM products WHERE id = %s", (product_id,))
+        conn.commit()
+    
     flash('Товар удалён')
     return redirect(url_for('main.admin'))
 
@@ -268,47 +293,51 @@ def checkout():
     phone = session.get('phone')
     if not phone:
         return jsonify({'success': False, 'msg': 'Войдите в аккаунт'})
-    conn = get_db_connection()
+    
     try:
-        result = conn.run("""
-            SELECT c.id, p.name, p.price
-            FROM carts c
-            JOIN products p ON c.product_id = p.id
-            WHERE c.user_phone = %s
-        """, (phone,))
-        items = fetchall_dict(result.rows, result.description)
-        if not items:
-            return jsonify({'success': False, 'msg': 'Корзина пуста'})
-        order_id = 100000 + int(datetime.now().timestamp()) % 100000
-        total = sum(item['price'] for item in items)
-        conn.run("DELETE FROM carts WHERE user_phone = %s", (phone,))
-        conn.commit()
-        return jsonify({
-            'success': True,
-            'order_id': order_id,
-            'total': total
-        })
+        with db_connection() as conn:
+            result = conn.run("""
+                SELECT c.id, p.name, p.price
+                FROM carts c
+                JOIN products p ON c.product_id = p.id
+                WHERE c.user_phone = %s
+            """, (phone,))
+            
+            items = fetchall_dict(result, conn.columns)
+            if not items:
+                return jsonify({'success': False, 'msg': 'Корзина пуста'})
+            
+            order_id = 100000 + int(datetime.now().timestamp()) % 100000
+            total = sum(item['price'] for item in items)
+            
+            conn.run("DELETE FROM carts WHERE user_phone = %s", (phone,))
+            conn.commit()
+            
+            return jsonify({
+                'success': True,
+                'order_id': order_id,
+                'total': total
+            })
     except Exception as e:
-        conn.rollback()
         return jsonify({'success': False, 'msg': str(e)})
-    finally:
-        conn.close()
 
 @bp.route('/edit_product/<int:product_id>', methods=['POST'])
 def edit_product(product_id):
     if not session.get('is_admin', False):
         flash('Нет доступа!')
         return redirect(url_for('main.admin'))
+    
     name = request.form['name']
     description = request.form['description']
     price = request.form['price']
     image_url = request.form['image_url']
-    conn = get_db_connection()
-    conn.run(
-        "UPDATE products SET name=%s, description=%s, price=%s, image_url=%s WHERE id=%s",
-        (name, description, price, image_url, product_id)
-    )
-    conn.commit()
-    conn.close()
+    
+    with db_connection() as conn:
+        conn.run(
+            "UPDATE products SET name=%s, description=%s, price=%s, image_url=%s WHERE id=%s",
+            (name, description, price, image_url, product_id)
+        )
+        conn.commit()
+    
     flash('Товар успешно обновлён!')
     return redirect(url_for('main.admin'))
