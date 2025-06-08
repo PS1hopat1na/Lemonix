@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="about-wrap">
+  <h1>О магазине Lemonix</h1>
+  <div class="about-section">
+    <p>
+      <b>Lemonix</b> — сеть современных магазинов электроники, где вы найдёте лучшие новинки по выгодным ценам.
+      Мы работаем для вас с 2020 года и уже заслужили доверие тысяч покупателей.
+    </p>
+    <div class="about-gallery">
+      <div class="about-photo">
+        <img src="{{ url_for('static', filename='outside_lemonix.png') }}" alt="Фасад магазина Lemonix">
+        <div class="about-photo-caption">Фасад нашего магазина</div>
+      </div>
+      <div class="about-photo">
+        <img src="{{ url_for('static', filename='inside_lemonix.png') }}" alt="Внутри магазина Lemonix">
+        <div class="about-photo-caption">Внутри Lemonix: всегда рады видеть вас!</div>
+      </div>
+    </div>
+  </div>
+
+  <hr class="about-hr">
+
+  <div class="about-contacts">
+    <h2>Контакты и поддержка</h2>
+    <p>
+      <b>Адрес:</b> Россия, г. Иркутск, ул. Александра Невского, д. 6, ТЦ "Lemonix", 1 этаж<br>
+      <b>Телефон магазина:</b> <a href="tel:+7 (950) 129-88-61">+7 (950) 129-88-61</a><br>
+      <b>Техподдержка:</b>
+      <ul>
+        <li>+7 (950) 129-88-61 — по вопросам заказов</li>
+        <li>+7 (950) 129-88-61 — по гарантии и возврату</li>
+        <li>Email: <a href="mailto:support@lemonix.ru">support@lemonix.ru</a></li>
+      </ul>
+      <b>Режим работы:</b> ежедневно, 10:00—21:00
+    </p>
+  </div>
+
+  <div class="about-map-block">
+    <h3>Как нас найти</h3>
+    <iframe src="https://yandex.ru/map-widget/v1/?um=constructor%3A01dfc5203b0acb5ef9823c71d6b0e3d8d20c82ab7dce55a9b41b1a076659992f&amp;source=constructor" width="883" height="668" frameborder="0"></iframe>
+  </div>
+
+  <hr class="about-hr">
+
+  <div class="about-awards">
+    <h2>Наши достижения</h2>
+    <ul>
+      <li>Премия "Лучший магазин электроники 2025" по версии Retail Awards</li>
+      <li>4,9 из 5 по отзывам покупателей</li>
+      <li>Собственная сеть пунктов выдачи по всей России</li>
+    </ul>
+  </div>
+
+  <div class="about-extra">
+    <h2>Почему выбирают Lemonix?</h2>
+    <ul>
+      <li>Только оригинальные товары от надёжных поставщиков</li>
+      <li>Гарантия и сервисное обслуживание</li>
+      <li>Быстрая доставка, удобный самовывоз</li>
+      <li>Еженедельные акции и выгодные предложения</li>
+    </ul>
+  </div>
+</div>
+{% endblock %}
+
