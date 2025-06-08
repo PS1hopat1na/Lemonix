@@ -238,4 +238,69 @@ def admin():
         )
         conn.commit()
         conn.close()
-        flash
+        flash('Товар успешно добавлен!')
+    products = get_all_products()
+    return render_template('admin.html', phone=phone, is_admin=is_admin, products=products)
+
+@bp.route('/delete_product/<int:product_id>', methods=['POST'])
+def delete_product(product_id):
+    if not session.get('is_admin', False):
+        flash('Нет доступа!')
+        return redirect(url_for('main.index'))
+    conn = get_db_connection()
+    conn.run("DELETE FROM reviews WHERE product_id = %s", (product_id,))
+    conn.run("DELETE FROM products WHERE id = %s", (product_id,))
+    conn.commit()
+    conn.close()
+    flash('Товар удалён')
+    return redirect(url_for('main.admin'))
+
+@bp.route('/checkout', methods=['POST'])
+def checkout():
+    phone = session.get('phone')
+    if not phone:
+        return jsonify({'success': False, 'msg': 'Войдите в аккаунт'})
+    conn = get_db_connection()
+    try:
+        result = conn.run("""
+            SELECT c.id, p.name, p.price
+            FROM carts c
+            JOIN products p ON c.product_id = p.id
+            WHERE c.user_phone = %s
+        """, (phone,))
+        items = fetchall_dict(result.rows, result.description)
+        if not items:
+            return jsonify({'success': False, 'msg': 'Корзина пуста'})
+        order_id = 100000 + int(datetime.now().timestamp()) % 100000
+        total = sum(item['price'] for item in items)
+        conn.run("DELETE FROM carts WHERE user_phone = %s", (phone,))
+        conn.commit()
+        return jsonify({
+            'success': True,
+            'order_id': order_id,
+            'total': total
+        })
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'success': False, 'msg': str(e)})
+    finally:
+        conn.close()
+
+@bp.route('/edit_product/<int:product_id>', methods=['POST'])
+def edit_product(product_id):
+    if not session.get('is_admin', False):
+        flash('Нет доступа!')
+        return redirect(url_for('main.admin'))
+    name = request.form['name']
+    description = request.form['description']
+    price = request.form['price']
+    image_url = request.form['image_url']
+    conn = get_db_connection()
+    conn.run(
+        "UPDATE products SET name=%s, description=%s, price=%s, image_url=%s WHERE id=%s",
+        (name, description, price, image_url, product_id)
+    )
+    conn.commit()
+    conn.close()
+    flash('Товар успешно обновлён!')
+    return redirect(url_for('main.admin'))
