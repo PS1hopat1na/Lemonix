@@ -26,7 +26,7 @@
     <h3>Рекомендуем посмотреть</h3>
     <div class="recommend-list">
       {% for rec in recommendations %}
-      <a href="{{ url_for('product_detail', product_id=rec.id) }}" class="recommend-item">
+      <a href="{{ url_for('main.product_detail', product_id=rec.id) }}" class="recommend-item">
         <img src="{{ rec.image_url }}" alt="{{ rec.name }}">
         <div class="rec-name">{{ rec.name }}</div>
         <div class="rec-price">{{ rec.price }} ₽</div>

@@ -11,21 +11,21 @@
   <header class="lemonix-header-new">
     <div class="header-container">
       <div class="logo-title">
-        <a href="{{ url_for('index') }}">
+        <a href="{{ url_for('main.index') }}">
           <img src="{{ url_for('static', filename='logo.png') }}" class="logo-img" alt="Lemonix">
         </a>
         <img src="{{ url_for('static', filename='title.png') }}" class="title-img" alt="Lemonix">
       </div>
       <nav class="main-nav">
-        <a href="{{ url_for('shop') }}">Магазин</a>
-        <a href="{{ url_for('about') }}">О нас</a>
-        <a href="{{ url_for('policy') }}">Политика</a>
+        <a href="{{ url_for('main.shop') }}">Магазин</a>
+        <a href="{{ url_for('main.about') }}">О нас</a>
+        <a href="{{ url_for('main.policy') }}">Политика</a>
         {% if is_admin %}
-          <a href="{{ url_for('admin') }}">Админ</a>
+          <a href="{{ url_for('main.admin') }}">Админ</a>
         {% endif %}
       </nav>
       <div class="nav-user">
-        <a href="{{ url_for('cart') }}" class="cart-link" title="Корзина" id="cart-link">
+        <a href="{{ url_for('main.cart') }}" class="cart-link" title="Корзина" id="cart-link">
           <span class="cart-icon">
             <svg height="23" width="23" viewBox="0 0 20 20" fill="none">
               <circle cx="8" cy="17" r="1.5" fill="#c5222a"/>
@@ -38,9 +38,9 @@
         {% if session.get('username') %}
           <img src="{{ url_for('static', filename='logo.png') }}" class="user-avatar-mini" alt="U">
           <span class="user-name">{{ session.get('username') }}</span>
-          <a href="{{ url_for('logout') }}" class="logout-btn">Выйти</a>
+          <a href="{{ url_for('main.logout') }}" class="logout-btn">Выйти</a>
         {% else %}
-          <a href="{{ url_for('login') }}" class="login-btn">Вход</a>
+          <a href="{{ url_for('main.login') }}" class="login-btn">Вход</a>
         {% endif %}
       </div>
     </div>
