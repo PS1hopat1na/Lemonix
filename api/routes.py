@@ -1,8 +1,7 @@
-from flask import Blueprint, render_template, request, redirect, session, flash, url_for, jsonify, current_app
-import psycopg2
+from flask import Blueprint, render_template, request, redirect, session, flash, url_for, jsonify
+import pg8000.native
 import urllib.parse
 import os
-from psycopg2.extras import RealDictCursor
 from datetime import datetime
 
 bp = Blueprint('main', __name__)
@@ -16,21 +15,25 @@ def get_db_connection():
     database = result.path[1:]
     hostname = result.hostname
     port = result.port
-    conn = psycopg2.connect(
-        dbname=database,
+
+    conn = pg8000.native.Connection(
         user=username,
         password=password,
+        database=database,
         host=hostname,
-        port=port,
-        cursor_factory=RealDictCursor
+        port=port
     )
     return conn
+
+def fetchall_dict(cursor):
+    columns = [desc[0] for desc in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 def get_all_products():
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM products ORDER BY id DESC")
-    products = cursor.fetchall()
+    products = fetchall_dict(cursor)
     cursor.close()
     conn.close()
     return products
@@ -41,7 +44,7 @@ def get_cart_count(phone):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM carts WHERE user_phone = %s", (phone,))
-    count = cursor.fetchone()['count']
+    count = cursor.fetchone()[0]
     cursor.close()
     conn.close()
     return count
@@ -65,10 +68,16 @@ def login():
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM users WHERE phone = %s", (phone,))
-        user = cursor.fetchone()
+        user_row = cursor.fetchone()
+        user = None
+        if user_row:
+            columns = [desc[0] for desc in cursor.description]
+            user = dict(zip(columns, user_row))
         if not user:
             cursor.execute("INSERT INTO users (phone, username) VALUES (%s, %s) RETURNING *", (phone, username))
-            user = cursor.fetchone()
+            inserted_row = cursor.fetchone()
+            columns = [desc[0] for desc in cursor.description]
+            user = dict(zip(columns, inserted_row))
             conn.commit()
         else:
             if username and user.get('username') != username:
@@ -104,12 +113,16 @@ def product_detail(product_id):
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM products WHERE id = %s", (product_id,))
     product = cursor.fetchone()
+    if product:
+        columns = [desc[0] for desc in cursor.description]
+        product = dict(zip(columns, product))
     cursor.execute("SELECT * FROM reviews WHERE product_id = %s ORDER BY created_at DESC", (product_id,))
-    reviews = cursor.fetchall()
+    reviews = fetchall_dict(cursor)
     cursor.execute("SELECT AVG(rating) FROM reviews WHERE product_id = %s", (product_id,))
-    avg_rating = cursor.fetchone()['avg'] or 0
+    avg_rating_row = cursor.fetchone()
+    avg_rating = avg_rating_row[0] if avg_rating_row else 0
     cursor.execute("SELECT * FROM products WHERE id != %s ORDER BY RANDOM() LIMIT 4", (product_id,))
-    recommendations = cursor.fetchall()
+    recommendations = fetchall_dict(cursor)
     cursor.close()
     conn.close()
 
@@ -168,7 +181,7 @@ def cart():
     cursor = conn.cursor()
     cursor.execute(
         "SELECT c.id as cart_id, p.* FROM carts c JOIN products p ON c.product_id=p.id WHERE c.user_phone=%s", (phone,))
-    cart_items = cursor.fetchall()
+    cart_items = fetchall_dict(cursor)
     cart_total = sum(item['price'] for item in cart_items)
     order_id = 100000 + int(datetime.now().timestamp()) % 100000
     order_date = datetime.now().strftime('%d.%m.%Y %H:%M')
@@ -192,7 +205,7 @@ def remove_from_cart(cart_id):
             JOIN products p ON c.product_id = p.id
             WHERE c.user_phone = %s
         """, (phone,))
-        rows = cursor.fetchall()
+        rows = fetchall_dict(cursor)
         cart_total = sum(row['price'] for row in rows)
         cart_count = len(rows)
         session['cart_count'] = cart_count
@@ -276,7 +289,7 @@ def checkout():
             JOIN products p ON c.product_id = p.id
             WHERE c.user_phone = %s
         """, (phone,))
-        items = cursor.fetchall()
+        items = fetchall_dict(cursor)
         if not items:
             return jsonify({'success': False, 'msg': 'Корзина пуста'})
         order_id = 100000 + int(datetime.now().timestamp()) % 100000
